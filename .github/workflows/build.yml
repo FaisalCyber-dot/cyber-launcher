@@ -22,6 +22,15 @@ jobs:
       - name: Unpack project
         run: unzip -q -o CyberLauncher-BlackBox.zip
 
+      - name: Apply overlay (optional)
+        run: |
+          if [ -f overlay.zip ]; then
+            unzip -q -o overlay.zip
+            echo "overlay applied:"; unzip -Z1 overlay.zip | grep -v '/$'
+          else
+            echo "no overlay.zip in the repo"
+          fi
+
       - name: Patch project (header include, 64-bit only native build)
         run: |
           # 1) NDK 30 libc++ no longer includes <cstddef> transitively
