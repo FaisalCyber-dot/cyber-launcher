@@ -44,4 +44,3 @@ jobs:
           name: CyberLauncher-debug
           path: CyberLauncher/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-          
