@@ -43,6 +43,19 @@ jobs:
           grep -n '#include' "$f"
           grep -n "abiFilters" CyberLauncher/Bcore/build.gradle CyberLauncher/Bcore/pine-core/build.gradle CyberLauncher/app/build.gradle
 
+      - name: Normalize file timestamps
+        run: |
+          # unzip reads a zip entry that has no UTC timestamp as local time of this runner (UTC).
+          # Entries stamped on a phone/PC in UTC+5 then lie hours in the future. ninja sees
+          # build.ninja as older than such an input forever:
+          #   ninja: error: manifest 'build.ninja' still dirty after 100 tries
+          echo "runner time (UTC): $(date -u '+%F %T')"
+          echo "newest file before touch:"
+          find CyberLauncher -type f -printf '%TY-%Tm-%Td %TH:%TM:%TS  %p\n' | sort | tail -3
+          find CyberLauncher -exec touch {} +
+          echo "newest file after touch:"
+          find CyberLauncher -type f -printf '%TY-%Tm-%Td %TH:%TM:%TS  %p\n' | sort | tail -1
+
       - name: Build
         shell: bash
         working-directory: CyberLauncher
