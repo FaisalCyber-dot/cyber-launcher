@@ -22,7 +22,16 @@ jobs:
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "ndk;29.0.13846066"
 
       - name: Unpack project
-        run: unzip -q -o CyberLauncher-4.7.1.zip
+        run: |
+          echo "files in the repo root:"; ls -la
+          z=$(ls -1 CyberLauncher-BlackBox.zip 2>/dev/null | head -n1)
+          if [ -n "$z" ]; then
+            echo "using $z"; unzip -q -o "$z"
+          elif [ -f CyberLauncher/gradlew ]; then
+            echo "using the CyberLauncher/ folder from the repo"
+          else
+            echo "ERROR: upload CyberLauncher-BlackBox.zip to the repo root (next to .github/)"; exit 1
+          fi
 
       - name: Apply overlay (optional)
         run: |
