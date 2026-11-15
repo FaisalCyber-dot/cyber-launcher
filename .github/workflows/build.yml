@@ -20,13 +20,58 @@ jobs:
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-28" "platforms;android-30" "build-tools;28.0.2" "build-tools;30.0.3" "ndk;21.0.6113669" "cmake;3.10.2.4988404"
 
       - name: Unpack project
-        run: unzip -q CyberLauncher-BlackBox.zip
+        run: unzip -q -o CyberLauncher-BlackBox.zip
+
+      - name: Patch project (header include, 64-bit only native build)
+        run: |
+          # 1) NDK 30 libc++ no longer includes <cstddef> transitively
+          f=CyberLauncher/Bcore/pine-core/src/main/cpp/utils/scoped_local_ref.h
+          grep -q '<cstddef>' "$f" || sed -i 's|#include "macros.h"|#include <cstddef>\n#include "macros.h"|' "$f"
+          # 2) the app is arm64-v8a only; do not build armeabi-v7a/x86 natives (armeabi-v7a pine fails to link with new lld)
+          sed -i "s/abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86'/abiFilters 'arm64-v8a'/" CyberLauncher/Bcore/build.gradle
+          sed -i "s/abiFilters 'armeabi-v7a', 'arm64-v8a'/abiFilters 'arm64-v8a'/" CyberLauncher/Bcore/pine-core/build.gradle
+          echo "== patched =="
+          grep -n '#include' "$f"
+          grep -n "abiFilters" CyberLauncher/Bcore/build.gradle CyberLauncher/Bcore/pine-core/build.gradle CyberLauncher/app/build.gradle
 
       - name: Build
+        shell: bash
         working-directory: CyberLauncher
         run: |
+          # force NDK 21: drop the runner's presets (NDK 30) and point AGP at 21 explicitly
+          unset ANDROID_NDK_HOME ANDROID_NDK_ROOT ANDROID_NDK_LATEST_HOME ANDROID_NDK
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          echo "ndk.dir=$ANDROID_HOME/ndk/21.0.6113669" >> local.properties
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee ../build.log
+          set +e
+          ./gradlew :app:assembleDebug --stacktrace --no-daemon > ../build.log 2>&1
+          rc=$?
+          set -e
+          echo "gradle exit code: $rc"
+          grep -n -E "BUILD (SUCCESSFUL|FAILED)" ../build.log || true
+          if [ "$rc" -ne 0 ]; then
+            echo "== first errors =="
+            grep -n -E "error:|What went wrong" -A3 ../build.log | head -60
+          fi
+          exit $rc
+
+      - name: Report what was built
+        if: always()
+        shell: bash
+        run: |
+          echo "== NDK versions seen in log =="
+          grep -o 'sdk/ndk/[0-9.]*' build.log | sort | uniq -c || true
+          echo "== files under app/build/outputs =="
+          find CyberLauncher/app/build/outputs -type f 2>/dev/null | head -50 || true
+          echo "== APK check =="
+          apk=CyberLauncher/app/build/outputs/apk/debug/app-debug.apk
+          if [ -f "$apk" ]; then
+            ls -l "$apk"
+            $ANDROID_HOME/build-tools/30.0.3/aapt dump badging "$apk" | grep -E "^package|sdkVersion|native-code" || true
+            unzip -l "$apk" | grep -E "\.so$" | head -30 || true
+          else
+            echo "NO APK at $apk"
+          fi
 
       - name: Upload log
         if: always()
@@ -40,3 +85,4 @@ jobs:
         with:
           name: CyberLauncher-debug
           path: CyberLauncher/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
