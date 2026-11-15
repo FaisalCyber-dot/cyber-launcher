@@ -20,16 +20,43 @@ jobs:
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-28" "platforms;android-30" "build-tools;28.0.2" "build-tools;30.0.3" "ndk;21.0.6113669" "cmake;3.10.2.4988404"
 
       - name: Unpack project
-        run: unzip -q CyberLauncher-BlackBox.zip
+        run: unzip -q -o CyberLauncher-BlackBox.zip
+
+      - name: Patch scoped_local_ref.h (missing <cstddef>)
+        run: |
+          f=CyberLauncher/Bcore/pine-core/src/main/cpp/utils/scoped_local_ref.h
+          grep -q '<cstddef>' "$f" || sed -i 's|#include "macros.h"|#include <cstddef>\n#include "macros.h"|' "$f"
+          grep -n '#include' "$f"
 
       - name: Build
         shell: bash
         working-directory: CyberLauncher
         run: |
-          # the runner presets ANDROID_NDK_HOME to NDK 30, AGP 4.0.1 would use it
+          # force NDK 21: the runner presets ANDROID_NDK_HOME to NDK 30
           export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/21.0.6113669
+          export ANDROID_NDK_ROOT=$ANDROID_NDK_HOME
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee ../build.log
+          ./gradlew :app:assembleDebug --stacktrace --no-daemon 2>&1 | tee ../build.log
+
+      - name: Report what was built
+        if: always()
+        shell: bash
+        run: |
+          echo "== NDK versions seen in log =="
+          grep -o 'sdk/ndk/[0-9.]*' build.log | sort | uniq -c || true
+          echo "== files under app/build/outputs =="
+          find CyberLauncher/app/build/outputs -type f 2>/dev/null | head -50 || true
+          echo "== APK check =="
+          apk=CyberLauncher/app/build/outputs/apk/debug/app-debug.apk
+          if [ -f "$apk" ]; then
+            ls -l "$apk"
+            $ANDROID_HOME/build-tools/30.0.3/aapt dump badging "$apk" | grep -E "^package|sdkVersion|native-code" || true
+            unzip -l "$apk" | grep -E "\.so$" | head -30 || true
+          else
+            echo "NO APK at $apk"
+          fi
 
       - name: Upload log
         if: always()
