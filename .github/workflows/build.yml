@@ -24,23 +24,13 @@ jobs:
       - name: Unpack project
         run: |
           echo "files in the repo root:"; ls -la
-          z=$(ls -1 CyberLauncher-BlackBox.zip 2>/dev/null | head -n1)
-          if [ -n "$z" ]; then
-            echo "using $z"; unzip -q -o "$z"
-          elif [ -f CyberLauncher/gradlew ]; then
-            echo "using the CyberLauncher/ folder from the repo"
-          else
-            echo "ERROR: upload CyberLauncher-BlackBox.zip to the repo root (next to .github/)"; exit 1
-          fi
-
-      - name: Apply overlay (optional)
-        run: |
-          if [ -f overlay.zip ]; then
-            unzip -q -o overlay.zip
-            echo "overlay applied:"; unzip -Z1 overlay.zip | grep -v '/$'
-          else
-            echo "no overlay.zip in the repo"
-          fi
+          test -f CyberLauncher-BlackBox.zip || { echo "ERROR: upload CyberLauncher-BlackBox.zip to the repo root (next to .github/)"; exit 1; }
+          # always start from a clean folder: an old unzipped CyberLauncher/ folder in the repo must not leak into the build
+          rm -rf CyberLauncher
+          unzip -q -o CyberLauncher-BlackBox.zip
+          # sanity: this must be the BlackBox app project, not the old launcher
+          test -f CyberLauncher/app/src/main/java/com/onebitmonochrome/blacksbbox/menu/MenuInjector.java || { echo "ERROR: wrong zip (MenuInjector.java missing)"; exit 1; }
+          test ! -d CyberLauncher/app/src/main/java/com/cyber/launcher || { echo "ERROR: old launcher sources found in the zip"; exit 1; }
 
       - name: Patch project (64-bit only native build)
         run: |
