@@ -69,8 +69,10 @@ jobs:
           echo "gradle exit code: $rc"
           grep -n -E "BUILD (SUCCESSFUL|FAILED)" ../build.log || true
           if [ "$rc" -ne 0 ]; then
+            echo "== every unresolved dependency =="
+            grep -E "Could not (find|resolve|GET|HEAD)" ../build.log | sed 's/^[[:space:]]*//' | sort -u | head -40 || true
             echo "== first errors =="
-            grep -n -E "error:|What went wrong" -A3 ../build.log | head -60
+            grep -n -E "error:|What went wrong" -A12 ../build.log | head -100
           fi
           exit $rc
 
