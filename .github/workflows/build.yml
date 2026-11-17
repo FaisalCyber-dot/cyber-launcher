@@ -32,6 +32,146 @@ jobs:
           test -f CyberLauncher/app/src/main/java/com/onebitmonochrome/blacksbbox/menu/MenuInjector.java || { echo "ERROR: wrong zip (MenuInjector.java missing)"; exit 1; }
           test ! -d CyberLauncher/app/src/main/java/com/cyber/launcher || { echo "ERROR: old launcher sources found in the zip"; exit 1; }
 
+      - name: Apply build fixes (repositories + StateView)
+        run: |
+          # 1) Maven Central/Google first. The Aliyun mirrors and JitPack in front of them fail on GitHub runners
+          #    (non-404 answers make Gradle abort), which shows up as dozens of "Could not resolve ..." on the classpath.
+          cat > CyberLauncher/settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google {
+                      content {
+                          includeGroupByRegex("com\\.android.*")
+                          includeGroupByRegex("com\\.google.*")
+                          includeGroupByRegex("androidx.*")
+                      }
+                  }
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+                  // JitPack only for the GitHub/Gitee libraries (FreeReflection, CornerLabelView, RVAdapter, ...)
+                  maven {
+                      url "https://www.jitpack.io"
+                      content {
+                          includeGroupByRegex("com\\.github\\..*")
+                          includeGroupByRegex("com\\.gitee\\..*")
+                      }
+                  }
+              }
+          }
+
+          rootProject.name = "NewBlackbox"
+
+          include ':app'
+          include ':blackbox-gallery-stub'
+          include(":black-reflection")
+          include(":compiler")
+          include ':Bcore'
+          EOF
+          # 2) com.github.nukc.stateview:kotlin:2.2.0 was JCenter-only (dead) -> use the in-tree StateView class
+          sed -i "/com.github.nukc.stateview:kotlin:2.2.0/d" CyberLauncher/app/build.gradle
+          mkdir -p CyberLauncher/app/src/main/java/com/github/nukc/stateview
+          cat > CyberLauncher/app/src/main/java/com/github/nukc/stateview/StateView.java <<'EOF'
+          package com.github.nukc.stateview;
+
+          import android.content.Context;
+          import android.graphics.Color;
+          import android.util.AttributeSet;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.view.ViewGroup;
+          import android.widget.FrameLayout;
+          import android.widget.LinearLayout;
+          import android.widget.ProgressBar;
+          import android.widget.TextView;
+
+          /**
+           * Minimal in-tree replacement for com.github.nukc.stateview:kotlin:2.2.0 (a JCenter-only artifact
+           * that no longer resolves from Maven Central / JitPack). Same package and class name, so the
+           * layouts and Kotlin code keep working unchanged. Only the API the app uses is provided:
+           * showContent(), showEmpty(), showLoading().
+           */
+          public class StateView extends FrameLayout {
+
+              private ProgressBar loadingView;
+              private TextView emptyView;
+
+              public StateView(Context context) {
+                  super(context);
+                  init();
+              }
+
+              public StateView(Context context, AttributeSet attrs) {
+                  super(context, attrs);
+                  init();
+              }
+
+              public StateView(Context context, AttributeSet attrs, int defStyleAttr) {
+                  super(context, attrs, defStyleAttr);
+                  init();
+              }
+
+              private void init() {
+                  // like the original: invisible and takes no space until a state is shown
+                  setVisibility(View.GONE);
+              }
+
+              public void showContent() {
+                  if (loadingView != null) loadingView.setVisibility(View.GONE);
+                  if (emptyView != null) emptyView.setVisibility(View.GONE);
+                  setVisibility(View.GONE);
+              }
+
+              public void showEmpty() {
+                  ensureViews();
+                  loadingView.setVisibility(View.GONE);
+                  emptyView.setVisibility(View.VISIBLE);
+                  reveal();
+              }
+
+              public void showLoading() {
+                  ensureViews();
+                  emptyView.setVisibility(View.GONE);
+                  loadingView.setVisibility(View.VISIBLE);
+                  reveal();
+              }
+
+              private void reveal() {
+                  setVisibility(View.VISIBLE);
+                  // overlay siblings in Frame/Constraint parents; a LinearLayout parent already stacks us above the content
+                  if (!(getParent() instanceof LinearLayout)) {
+                      bringToFront();
+                  }
+              }
+
+              private void ensureViews() {
+                  if (loadingView != null) return;
+                  Context c = getContext();
+
+                  loadingView = new ProgressBar(c);
+                  loadingView.setIndeterminate(true);
+                  addView(loadingView, new LayoutParams(
+                          ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+
+                  emptyView = new TextView(c);
+                  emptyView.setText("Nothing here yet");
+                  emptyView.setTextSize(16);
+                  emptyView.setTextColor(Color.GRAY);
+                  emptyView.setGravity(Gravity.CENTER);
+                  addView(emptyView, new LayoutParams(
+                          ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+              }
+          }
+          EOF
+          echo "== settings.gradle =="; cat CyberLauncher/settings.gradle
+          echo "== nukc references in app/build.gradle (expect none) =="; grep -n "nukc" CyberLauncher/app/build.gradle || true
+
       - name: Patch project (64-bit only native build)
         run: |
           # the app is arm64-v8a only; skip armeabi-v7a natives of Bcore (harmless if already done in the zip)
